@@ -745,7 +745,7 @@ qboolean Host_FilterTime(float time)
 
 #ifdef BUILD_5787
     else if (host_frametime < 0.001)
-		host_frametime = 0.001
+		host_frametime = 0.001;
 #endif
 
 	return TRUE;
