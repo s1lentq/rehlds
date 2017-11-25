@@ -46,7 +46,7 @@ uint32 DELTAJIT_CreateMask(int startBit, int endBit) {
 unsigned int DELTAJIT_GetFieldSize(delta_description_t* desc) {
 	switch (desc->fieldType & ~DT_SIGNED) {
 	case DT_BYTE: return 1;
-	case DT_SHORT: return 2; 
+	case DT_SHORT: return 2;
 	case DT_FLOAT:
 	case DT_INTEGER:
 	case DT_ANGLE:
@@ -100,7 +100,7 @@ void DELTAJIT_CreateDescription(delta_t* delta, deltajitdata_t &jitdesc) {
 
 		unsigned int blockId = fieldDesc->fieldOffset / 16;
 		unsigned int blockStart = blockId * 16;
-		unsigned int fieldSize = DELTAJIT_GetFieldSize(fieldDesc);		
+		unsigned int fieldSize = DELTAJIT_GetFieldSize(fieldDesc);
 
 		auto jitField = &jitdesc.fields[i];
 		jitField->id = i;
@@ -392,7 +392,7 @@ void CDeltaClearMarkFieldsJIT::callConditionalEncoder(Addr src, Addr dst, Addr d
 		push(edi);
 		push(esi);
 		push(eax);
-		
+
 		call(ecx);
 		add(esp, 12);
 	L(no_encoder);
@@ -476,11 +476,11 @@ CDeltaClearMarkFieldsJIT::Result CDeltaClearMarkFieldsJIT::main(Addr src, Addr d
 			xmm0-xmm2: loaded src
 			xmm3-xmm5: loaded dst
 			xmm6: temp
-			xmm7: marked fields mask	
+			xmm7: marked fields mask
 	*/
 	mov(esi, ptr[src]);
 	mov(edi, ptr[dst]);
-	
+
 	pxor(marked_fields_mask, marked_fields_mask);
 
 	// check changed blocks
@@ -507,7 +507,7 @@ CDeltaClearMarkFieldsJIT::Result CDeltaClearMarkFieldsJIT::main(Addr src, Addr d
 
 	//emit conditional encoder call
 	callConditionalEncoder(src, dst, deltaJit);
-	
+
 	// check if mask is empty
 	mov(edi, dword_ptr[ebx + delta_markbits_offset]);
 	or_(edi, dword_ptr[ebx + delta_markbits_offset + 4]);
@@ -658,7 +658,7 @@ CDeltaJit::~CDeltaJit() {
 }
 
 CDeltaJitRegistry::CDeltaJitRegistry() {
-	
+
 }
 
 void CDeltaJitRegistry::RegisterDeltaJit(delta_t* delta, CDeltaJit* deltaJit) {

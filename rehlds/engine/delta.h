@@ -80,7 +80,7 @@ typedef struct delta_s
 	encoder_t conditionalencode;
 	delta_description_t *pdd;
 
-#ifdef REHLDS_FIXES
+#ifdef REHLDS_DELTA_JIT
 	CDeltaJit* jit;
 #endif
 } delta_t;
