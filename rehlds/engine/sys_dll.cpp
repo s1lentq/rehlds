@@ -618,6 +618,21 @@ double EXT_FUNC Sys_FloatTime(void)
 
 double Sys_FloatTime(void)
 {
+#ifdef BUILD_5787
+	struct timeval tv;
+	static time_t secbase;
+	gettimeofday(&tv, nullptr);
+
+	if (secbase)
+	{
+		return (double)tv.tv_usec / 1000000.0 + (double)(tv.tv_sec - secbase);
+	}
+	else
+	{
+		secbase = tv.tv_sec;
+		return (double)tv.tv_usec / 1000000.0;
+	}
+#else
 	static struct timespec start_time;
 	static bool bInitialized = false;
 	struct timespec now;
@@ -629,6 +644,7 @@ double Sys_FloatTime(void)
 	}
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (now.tv_sec - start_time.tv_sec) + now.tv_nsec * 0.000000001;
+#endif
 }
 
 #endif //_WIN32

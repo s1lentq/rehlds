@@ -743,6 +743,11 @@ qboolean Host_FilterTime(float time)
 	if (host_frametime > 0.25f)
 		host_frametime = 0.25f;
 
+#ifdef BUILD_5787
+    else if (host_frametime < 0.001)
+		host_frametime = 0.001
+#endif
+
 	return TRUE;
 }
 
