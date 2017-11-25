@@ -7,7 +7,7 @@ rootProject.ext.createGccConfig = { boolean release, BinaryKind binKind ->
 	if (release) {
 		cfg = new GccToolchainConfig(
 				compilerOptions: new GccToolchainConfig.CompilerOptions(
-						optimizationLevel: OptimizationLevel.LEVEL_3,
+						optimizationLevel: OptimizationLevel.DISABLE,
 						stackProtector: false,
 						//interProceduralOptimizations: true,
 
