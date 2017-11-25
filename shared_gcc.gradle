@@ -26,9 +26,9 @@ rootProject.ext.createGccConfig = { boolean release, BinaryKind binKind ->
 				linkerOptions: new GccToolchainConfig.LinkerOptions(
 						//interProceduralOptimizations: true,
 						stripSymbolTable: false,
-						staticLibGcc: false,
+						staticLibGcc: true,
 						//staticIntel: true,
-						staticLibStdCpp: false,
+						staticLibStdCpp: true,
 				),
 
 				librarianOptions: new GccToolchainConfig.LibrarianOptions(

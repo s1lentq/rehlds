@@ -1,3 +1,3 @@
 #include "precompiled.h"
 
-#include "stdc++compat.cpp"
+//#include "stdc++compat.cpp"
