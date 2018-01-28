@@ -349,7 +349,7 @@ int EXT_FUNC DELTA_FindFieldIndex(struct delta_s *pFields, const char *fieldname
 
 void EXT_FUNC DELTA_SetField(struct delta_s *pFields, const char *fieldname)
 {
-#ifdef REHLDS_DELTA_JIT
+#if defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)
 	int index = DELTA_FindFieldIndex(pFields, fieldname);
 
 	if (index != -1)
@@ -366,7 +366,7 @@ void EXT_FUNC DELTA_SetField(struct delta_s *pFields, const char *fieldname)
 
 void EXT_FUNC DELTA_UnsetField(struct delta_s *pFields, const char *fieldname)
 {
-#ifdef REHLDS_DELTA_JIT
+#if defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)
 	int index = DELTA_FindFieldIndex(pFields, fieldname);
 
 	if (index != -1)
@@ -383,7 +383,7 @@ void EXT_FUNC DELTA_UnsetField(struct delta_s *pFields, const char *fieldname)
 
 void EXT_FUNC DELTA_SetFieldByIndex(struct delta_s *pFields, int fieldNumber)
 {
-#ifdef REHLDS_DELTA_JIT
+#if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 	DELTAJit_SetFieldByIndex(pFields, fieldNumber);
 #else
 	pFields->pdd[fieldNumber].flags |= FDT_MARK;
@@ -392,7 +392,7 @@ void EXT_FUNC DELTA_SetFieldByIndex(struct delta_s *pFields, int fieldNumber)
 
 void EXT_FUNC DELTA_UnsetFieldByIndex(struct delta_s *pFields, int fieldNumber)
 {
-#ifdef REHLDS_DELTA_JIT
+#if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 	DELTAJit_UnsetFieldByIndex(pFields, fieldNumber);
 #else
 	pFields->pdd[fieldNumber].flags &= ~FDT_MARK;
@@ -407,11 +407,14 @@ void DELTA_ClearFlags(delta_t *pFields)
 	{
 		pitem->flags = 0;
 	}
+#if defined REHLDS_FIXES && !defined REHLDS_JIT
+	pFields->originalMarkedFieldsMask.u64 = 0;
+#endif
 }
 
 int DELTA_TestDelta(unsigned char *from, unsigned char *to, delta_t *pFields)
 {
-#ifdef REHLDS_DELTA_JIT
+#if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDSJIT
 	return DELTAJit_TestDelta(from, to, pFields);
 #else
 	int i;
@@ -562,6 +565,11 @@ void DELTA_MarkSendFields(unsigned char *from, unsigned char *to, delta_t *pFiel
 			Con_Printf("%s: Bad field type %i\n", __func__, fieldType);
 			break;
 		}
+
+#if defined REHLDS_FIXES && !defined REHLDS_JIT
+		if (pTest->flags & FDT_MARK)
+			pFields->originalMarkedFieldsMask.u32[i >> 5] |= (1 << (i & 31));
+#endif
 	}
 	if (pFields->conditionalencode)
 		pFields->conditionalencode(pFields, from, to);
@@ -599,7 +607,7 @@ void DELTA_SetSendFlagBits(delta_t *pFields, int *bits, int *bytecount)
 
 qboolean DELTA_IsFieldMarked(delta_t* pFields, int fieldNumber)
 {
-#ifdef REHLDS_DELTA_JIT
+#if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 	return DELTAJit_IsFieldMarked(pFields, fieldNumber);
 #else
 	return pFields->pdd[fieldNumber].flags & FDT_MARK;
@@ -618,8 +626,13 @@ void DELTA_WriteMarkedFields(unsigned char *from, unsigned char *to, delta_t *pF
 
 	for (i = 0, pTest = pFields->pdd; i < fieldCount; i++, pTest++)
 	{
+#if defined (REHLDS_OPT_PEDANTIC) || defined (REHLDS_FIXES)
 		if (!DELTA_IsFieldMarked(pFields, i))
 			continue;
+#else
+		if (!(pTest->flags & FDT_MARK))
+			continue;
+#endif
 
 		fieldSign = pTest->fieldType & DT_SIGNED;
 		fieldType = pTest->fieldType & ~DT_SIGNED;
@@ -720,7 +733,7 @@ qboolean DELTA_CheckDelta(unsigned char *from, unsigned char *to, delta_t *pFiel
 {
 	qboolean sendfields;
 
-#ifdef REHLDS_DELTA_JIT
+#if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 	sendfields = DELTAJit_Fields_Clear_Mark_Check(from, to, pFields, NULL);
 #else
 	DELTA_ClearFlags(pFields);
@@ -735,23 +748,71 @@ NOINLINE qboolean DELTA_WriteDelta(unsigned char *from, unsigned char *to, qbool
 {
 	qboolean sendfields;
 
-#ifdef REHLDS_DELTA_JIT
+#if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 	sendfields = DELTAJit_Fields_Clear_Mark_Check(from, to, pFields, NULL);
-#else // REHLDS_DELTA_JIT
+#else // REHLDS_OPT_PEDANTIC || REHLDS_FIXES
 	DELTA_ClearFlags(pFields);
 	DELTA_MarkSendFields(from, to, pFields);
 	sendfields = DELTA_CountSendFields(pFields);
-#endif // REHLDS_DELTA_JIT
+#endif // REHLDS_OPT_PEDANTIC || REHLDS_FIXES
 
 	_DELTA_WriteDelta(from, to, force, pFields, callback, sendfields);
 	return sendfields;
 }
 
-#if defined(REHLDS_DELTA_JIT) && defined(REHLDS_FIXES) // Fix for https://github.com/dreamstalker/rehlds/issues/24
+#ifdef REHLDS_FIXES //Fix for https://github.com/dreamstalker/rehlds/issues/24
 qboolean DELTA_WriteDeltaForceMask(unsigned char *from, unsigned char *to, qboolean force, delta_t *pFields, void(*callback)(void), void* pForceMask) {
+#ifdef REHLDS_JIT
 	qboolean sendfields = DELTAJit_Fields_Clear_Mark_Check(from, to, pFields, pForceMask);
 	_DELTA_WriteDelta(from, to, force, pFields, callback, sendfields);
 	return sendfields;
+#else
+	DELTA_ClearFlags(pFields);
+
+	// force fields
+	if (pForceMask) {
+		delta_description_t *pTest;
+		int i;
+		delta_marked_mask_t forceMask = *(delta_marked_mask_t *)pForceMask;
+
+		for (i = 0, pTest = pFields->pdd; i < pFields->fieldCount; i++, pTest++) {
+			int mark = (forceMask.u32[i >> 5] & (1 << (i & 31))) ? FDT_MARK : 0;
+			pTest->flags |= mark;
+		}
+	}
+
+	DELTA_MarkSendFields(from, to, pFields);
+	qboolean sendfields = DELTA_CountSendFields(pFields);
+	_DELTA_WriteDelta(from, to, force, pFields, callback, sendfields);
+	return sendfields;
+#endif
+}
+
+uint64 DELTA_GetOriginalMask(delta_t* pFields)
+{
+#ifdef REHLDS_JIT
+	return DELTAJit_GetOriginalMask(pFields);
+#else
+	return pFields->originalMarkedFieldsMask.u64;
+#endif
+}
+
+uint64 DELTA_GetMaskU64(delta_t* pFields)
+{
+#ifdef REHLDS_JIT
+	return DELTAJit_GetMaskU64(pFields);
+#else
+	delta_description_t *pTest;
+	int i;
+	delta_marked_mask_t mask = {};
+
+	for (i = 0, pTest = pFields->pdd; i < pFields->fieldCount; i++, pTest++) {
+		if (pTest->flags & FDT_MARK)
+			mask.u32[i >> 5] |= (1 << (i & 31));
+	}
+
+	return mask.u64;
+#endif
 }
 #endif
 
@@ -763,7 +824,7 @@ qboolean _DELTA_WriteDelta(unsigned char *from, unsigned char *to, qboolean forc
 
 	if (sendfields || force)
 	{
-#ifdef REHLDS_DELTA_JIT
+#if (defined(REHLDS_OPT_PEDANTIC) || defined(REHLDS_FIXES)) && defined REHLDS_JIT
 		DELTAJit_SetSendFlagBits(pFields, bits, &bytecount);
 #else
 		DELTA_SetSendFlagBits(pFields, bits, &bytecount);

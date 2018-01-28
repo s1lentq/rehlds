@@ -28,10 +28,6 @@
 
 #include "precompiled.h"
 
-#ifdef _WIN32
-CRITICAL_SECTION net_cs;
-#endif // _WIN32
-
 qboolean net_thread_initialized;
 
 loopback_t loopbacks[2];
@@ -46,15 +42,14 @@ netadr_t net_from;
 sizebuf_t net_message;
 qboolean noip;
 qboolean noipx;
-
-int use_thread;
+qboolean use_thread;
 
 unsigned char net_message_buffer[NET_MAX_PAYLOAD];
 unsigned char in_message_buf[NET_MAX_PAYLOAD];
 sizebuf_t in_message;
 netadr_t in_from;
 
-#if defined(REHLDS_FIXES) && !defined(HOOK_ENGINE)
+#ifdef REHLDS_FIXES
 // Define default to INVALID_SOCKET
 #define INV_SOCK INVALID_SOCKET
 #else
@@ -62,30 +57,21 @@ netadr_t in_from;
 #define INV_SOCK 0
 #endif
 
-#ifndef HOOK_ENGINE
 SOCKET ip_sockets[NS_MAX] = { INV_SOCK, INV_SOCK, INV_SOCK };
-#else
-SOCKET ip_sockets[NS_MAX];
-#endif
 
 #ifdef _WIN32
-#ifndef HOOK_ENGINE
 SOCKET ipx_sockets[NS_MAX] = { INV_SOCK, INV_SOCK, INV_SOCK };
-#else
-SOCKET ipx_sockets[NS_MAX];
 #endif
-#endif // _WIN32
 
 LONGPACKET gNetSplit;
 net_messages_t *messages[NS_MAX];
 net_messages_t *normalqueue;
-//void *hNetThread;
-//int32 dwNetThreadId;
 
-/*
-* Globals initialization
-*/
-#ifndef HOOK_ENGINE
+#ifdef _WIN32
+HANDLE hNetThread;
+DWORD dwNetThreadId;
+CRITICAL_SECTION net_cs;
+#endif
 
 cvar_t net_address = { "net_address", "", 0, 0.0f, NULL };
 cvar_t ipname = { "ip", "localhost", 0, 0.0f, NULL };
@@ -103,7 +89,7 @@ cvar_t multicastport = { "multicastport", "27025", 0, 0.0f, NULL };
 #ifdef _WIN32
 cvar_t ipx_hostport = { "ipx_hostport", "0", 0, 0.0f, NULL };
 cvar_t ipx_clientport = { "ipx_clientport", "0", 0, 0.0f, NULL };
-#endif //_WIN32
+#endif
 
 cvar_t fakelag = { "fakelag", "0.0", 0, 0.0f, NULL };
 cvar_t fakeloss = { "fakeloss", "0.0", 0, 0.0f, NULL };
@@ -112,36 +98,7 @@ cvar_t net_graphwidth = { "net_graphwidth", "150", 0, 0.0f, NULL };
 cvar_t net_scale = { "net_scale", "5", FCVAR_ARCHIVE, 0.0f, NULL };
 cvar_t net_graphpos = { "net_graphpos", "1", FCVAR_ARCHIVE, 0.0f, NULL };
 
-#else // HOOK_ENGINE
-
-cvar_t net_address;
-cvar_t ipname;
-cvar_t defport;
-cvar_t ip_clientport;
-cvar_t clientport;
-int net_sleepforever;
-
-cvar_t clockwindow;
-
-cvar_t iphostport;
-cvar_t hostport;
-cvar_t multicastport;
-
-#ifdef _WIN32
-cvar_t ipx_hostport;
-cvar_t ipx_clientport;
-#endif // _WIN32
-
-cvar_t fakelag;
-cvar_t fakeloss;
-cvar_t net_graph;
-cvar_t net_graphwidth;
-cvar_t net_scale;
-cvar_t net_graphpos;
-
-#endif // HOOK_ENGINE
-
-void NET_ThreadLock(void)
+void NET_ThreadLock()
 {
 #ifdef _WIN32
 	if (use_thread && net_thread_initialized)
@@ -151,7 +108,7 @@ void NET_ThreadLock(void)
 #endif // _WIN32
 }
 
-void NET_ThreadUnlock(void)
+void NET_ThreadUnlock()
 {
 #ifdef _WIN32
 	if (use_thread && net_thread_initialized)
@@ -170,17 +127,19 @@ void NetadrToSockadr(const netadr_t *a, struct sockaddr *s)
 {
 	Q_memset(s, 0, sizeof(*s));
 
+	auto s_in = (sockaddr_in *)s;
+
 	switch (a->type)
 	{
 	case NA_BROADCAST:
-		((struct sockaddr_in *)s)->sin_family = AF_INET;
-		((struct sockaddr_in *)s)->sin_addr.s_addr = INADDR_BROADCAST;
-		((struct sockaddr_in *)s)->sin_port = a->port;
+		s_in->sin_family = AF_INET;
+		s_in->sin_addr.s_addr = INADDR_BROADCAST;
+		s_in->sin_port = a->port;
 		break;
 	case NA_IP:
-		((struct sockaddr_in *)s)->sin_family = AF_INET;
-		((struct sockaddr_in *)s)->sin_addr.s_addr = *(int *)&a->ip;
-		((struct sockaddr_in *)s)->sin_port = a->port;
+		s_in->sin_family = AF_INET;
+		s_in->sin_addr.s_addr = *(int *)&a->ip;
+		s_in->sin_port = a->port;
 		break;
 #ifdef _WIN32
 	case NA_IPX:
@@ -212,7 +171,7 @@ void SockadrToNetadr(const struct sockaddr *s, netadr_t *a)
 	else if (s->sa_family == AF_IPX)
 	{
 		a->type = NA_IPX;
-		Q_memcpy(a->ipx, s->sa_data, 10);
+		Q_memcpy(a->ipx, s->sa_data, sizeof(a->ipx));
 		a->port = *(unsigned short *)&s->sa_data[10];
 	}
 #endif // _WIN32
@@ -392,68 +351,26 @@ char *NET_BaseAdrToString(netadr_t& a)
 
 qboolean NET_StringToSockaddr(const char *s, struct sockaddr *sadr)
 {
-	struct hostent *h;
-	char *colon;
-	int val;
-	char copy[128];
-
 	Q_memset(sadr, 0, sizeof(*sadr));
+
 #ifdef _WIN32
+	// IPX support.
 	if (Q_strlen(s) >= 24 && s[8] == ':' && s[21] == ':')
 	{
 		sadr->sa_family = AF_IPX;
-
-		copy[2] = 0;
-
-		copy[0] = s[0];
-		copy[1] = s[1];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[0] = (char)val;
-
-		copy[0] = s[2];
-		copy[1] = s[3];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[1] = (char)val;
-
-		copy[0] = s[4];
-		copy[1] = s[5];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[2] = (char)val;
-
-		copy[0] = s[6];
-		copy[1] = s[7];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[3] = (char)val;
-
-		copy[0] = s[9];
-		copy[1] = s[10];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[4] = (char)val;
-
-		copy[0] = s[11];
-		copy[1] = s[12];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[5] = (char)val;
-
-		copy[0] = s[13];
-		copy[1] = s[14];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[6] = (char)val;
-
-		copy[0] = s[15];
-		copy[1] = s[16];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[7] = (char)val;
-
-		copy[0] = s[17];
-		copy[1] = s[18];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[8] = (char)val;
-
-		copy[0] = s[19];
-		copy[1] = s[20];
-		sscanf(copy, "%x", &val);
-		sadr->sa_data[9] = (char)val;
+		int val = 0;
+		for(int i = 0; i < 20; i+=2)
+		{
+			if (s[i] == ':')
+			{
+				--i; // Skip one char on next iteration.
+				continue;
+			}
+			// Convert from hexademical represantation to sockaddr
+			char temp[3] = { s[i], s[i + 1], '\0' };
+			sscanf(temp, "%x", &val);
+			sadr->sa_data[i / 2] = (char)val;
+		}
 
 		sscanf(s + 22, "%u", &val);
 		*(uint16 *)&sadr->sa_data[10] = htons(val);
@@ -462,36 +379,38 @@ qboolean NET_StringToSockaddr(const char *s, struct sockaddr *sadr)
 	}
 #endif // _WIN32
 
-	((sockaddr_in *)sadr)->sin_family = AF_INET;
-	((sockaddr_in *)sadr)->sin_port = 0;
+	auto *sadr_in = (sockaddr_in *)sadr;
 
+	sadr_in->sin_family = AF_INET;
+
+	char copy[128];
 	Q_strncpy(copy, s, sizeof(copy) - 1);
 	copy[sizeof(copy) - 1] = 0;
 
 	// Parse port
-	colon = copy;
-	while (*colon != 0)
+	char *colon = Q_strchr(copy, ':');
+	if(colon != nullptr)
 	{
-		if (*colon == ':')
-		{
-			*colon = 0;
-			val = Q_atoi(colon + 1);
-			((sockaddr_in *)sadr)->sin_port = htons(val);
-		}
-		colon++;
+		*colon = '\0';
+		sadr_in->sin_port = htons(Q_atoi(colon + 1));
+	}
+	else
+	{
+		sadr_in->sin_port = 0;
 	}
 
 	// Parse address
-	((sockaddr_in *)sadr)->sin_addr.s_addr = inet_addr(copy);
-	if (((sockaddr_in *)sadr)->sin_addr.s_addr == INADDR_NONE)
+	sadr_in->sin_addr.s_addr = inet_addr(copy);
+	if (sadr_in->sin_addr.s_addr == INADDR_NONE)
 	{
-		h = CRehldsPlatformHolder::get()->gethostbyname(copy);
+		struct hostent *host = CRehldsPlatformHolder::get()->gethostbyname(copy);
 
-		if (h == NULL || h->h_addr == NULL)
+		if (host == nullptr || host->h_addr == nullptr)
 		{
 			return FALSE;
 		}
-		((sockaddr_in *)sadr)->sin_addr.s_addr = *(uint32 *)h->h_addr;
+
+		sadr_in->sin_addr.s_addr = *(uint32 *)host->h_addr;
 	}
 	return TRUE;
 }
@@ -606,10 +525,7 @@ void NET_TransferRawData(sizebuf_t *msg, unsigned char *pStart, int nSize)
 
 qboolean NET_GetLoopPacket(netsrc_t sock, netadr_t *in_from_, sizebuf_t *msg)
 {
-	int i;
-	loopback_t *loop;
-
-	loop = &loopbacks[sock];
+	loopback_t *loop = &loopbacks[sock];
 
 	if (loop->send - loop->get > 4)
 	{
@@ -618,7 +534,7 @@ qboolean NET_GetLoopPacket(netsrc_t sock, netadr_t *in_from_, sizebuf_t *msg)
 
 	if (loop->get < loop->send)
 	{
-		i = loop->get & (MAX_LOOPBACK - 1);
+		int i = loop->get & (MAX_LOOPBACK - 1);
 		loop->get++;
 
 		NET_TransferRawData(msg, loop->msgs[i].data, loop->msgs[i].datalen);
@@ -633,14 +549,11 @@ qboolean NET_GetLoopPacket(netsrc_t sock, netadr_t *in_from_, sizebuf_t *msg)
 
 void NET_SendLoopPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 {
-	int i;
-	loopback_t *loop;
-
 	NET_ThreadLock();
 
-	loop = &loopbacks[sock ^ 1];
+	loopback_t *loop = &loopbacks[sock ^ 1];
 
-	i = loop->send & (MAX_LOOPBACK - 1);
+	int i = loop->send & (MAX_LOOPBACK - 1);
 	loop->send++;
 
 #ifdef REHLDS_CHECKS
@@ -668,15 +581,10 @@ NOXREF int NET_CountLaggedList(packetlag_t *pList)
 {
 	NOXREFCHECK;
 
-	int c;
-	packetlag_t *p;
-
-	c = 0;
-	p = pList->pNext;
-	while (p && p != pList)
+	int c = 0;
+	for (packetlag_t* p = pList->pNext; p && p != pList; p = p->pNext)
 	{
 		c++;
-		p = p->pNext;
 	}
 
 	return c;
@@ -684,12 +592,10 @@ NOXREF int NET_CountLaggedList(packetlag_t *pList)
 
 void NET_ClearLaggedList(packetlag_t *pList)
 {
-	packetlag_t *p, *n;
-
-	p = pList->pNext;
+	packetlag_t *p = pList->pNext;
 	while (p && p != pList)
 	{
-		n = p->pNext;
+		packetlag_t *n = p->pNext;
 		NET_RemoveFromPacketList(p);
 		if (p->pPacketData)
 		{
@@ -727,14 +633,11 @@ void NET_AddToLagged(netsrc_t sock, packetlag_t *pList, packetlag_t *pPacket, ne
 	Q_memcpy(&pPacket->net_from_, net_from_, sizeof(netadr_t));
 }
 
-void NET_AdjustLag(void)
+void NET_AdjustLag()
 {
 	static double lasttime = realtime;
-	double dt;
-	float diff;
-	float converge;
 
-	dt = realtime - lasttime;
+	double dt = realtime - lasttime;
 	if (dt <= 0.0)
 	{
 		dt = 0.0;
@@ -752,8 +655,8 @@ void NET_AdjustLag(void)
 	{
 		if (fakelag.value != gFakeLag)
 		{
-			diff = fakelag.value - gFakeLag;
-			converge = dt * 200.0;
+			float diff = fakelag.value - gFakeLag;
+			float converge = dt * 200.0;
 			if (fabs(diff) < converge)
 				converge = fabs(diff);
 			if (diff < 0.0)
@@ -771,19 +674,13 @@ void NET_AdjustLag(void)
 
 qboolean NET_LagPacket(qboolean newdata, netsrc_t sock, netadr_t *from, sizebuf_t *data)
 {
-	packetlag_t *pNewPacketLag;
-	packetlag_t *pPacket;
-	float curtime;
-	int ninterval;
-	static int losscount[NS_MAX];
-
 	if (gFakeLag <= 0.0)
 	{
 		NET_ClearLagData(TRUE, TRUE);
 		return newdata;
 	}
 
-	curtime = realtime;
+	float curtime = realtime;
 #ifdef REHLDS_FIXES
 	if (newdata && data)
 #else
@@ -794,10 +691,11 @@ qboolean NET_LagPacket(qboolean newdata, netsrc_t sock, netadr_t *from, sizebuf_
 		{
 			if (allow_cheats)
 			{
+				static int losscount[NS_MAX] = {};
 				++losscount[sock];
 				if (fakeloss.value <= 0.0f)
 				{
-					ninterval = fabs(fakeloss.value);
+					int ninterval = fabs(fakeloss.value);
 					if (ninterval < 2)
 						ninterval = 2;
 					if ((losscount[sock] % ninterval) == 0)
@@ -814,10 +712,12 @@ qboolean NET_LagPacket(qboolean newdata, netsrc_t sock, netadr_t *from, sizebuf_
 				Cvar_SetValue("fakeloss", 0.0);
 			}
 		}
-		pNewPacketLag = (packetlag_t *)Mem_ZeroMalloc(0x28u);
+
+		packetlag_t *pNewPacketLag = (packetlag_t *)Mem_ZeroMalloc(sizeof(packetlag_t));
 		NET_AddToLagged(sock, &g_pLagData[sock], pNewPacketLag, from, *data, curtime);
 	}
-	pPacket = g_pLagData[sock].pNext;
+
+	packetlag_t *pPacket = g_pLagData[sock].pNext;
 
 	while (pPacket != &g_pLagData[sock])
 	{
@@ -826,6 +726,7 @@ qboolean NET_LagPacket(qboolean newdata, netsrc_t sock, netadr_t *from, sizebuf_
 
 		pPacket = pPacket->pNext;
 	}
+
 	if (pPacket == &g_pLagData[sock])
 		return FALSE;
 
@@ -841,14 +742,13 @@ qboolean NET_LagPacket(qboolean newdata, netsrc_t sock, netadr_t *from, sizebuf_
 
 void NET_FlushSocket(netsrc_t sock)
 {
-	struct sockaddr from;
-	socklen_t fromlen;
-	SOCKET net_socket;
-	unsigned char buf[MAX_UDP_PACKET];
-
-	net_socket = ip_sockets[sock];
+	SOCKET net_socket = ip_sockets[sock];
 	if (net_socket != INV_SOCK)
 	{
+		struct sockaddr from;
+		socklen_t fromlen;
+		unsigned char buf[MAX_UDP_PACKET];
+
 		fromlen = 16;
 		while (CRehldsPlatformHolder::get()->recvfrom(net_socket, (char*)buf, sizeof buf, 0, &from, &fromlen) > 0)
 			;
@@ -857,23 +757,20 @@ void NET_FlushSocket(netsrc_t sock)
 
 qboolean NET_GetLong(unsigned char *pData, int size, int *outSize)
 {
-	unsigned int packetNumber;
-	unsigned int packetCount;
-	int sequenceNumber;
-	unsigned char packetID;
 	static int gNetSplitFlags[NET_WS_MAX_FRAGMENTS];
 	SPLITPACKET *pHeader = (SPLITPACKET *) pData;
 
-	sequenceNumber = pHeader->sequenceNumber;
-	packetID = pHeader->packetID;
-	packetCount = packetID & 0xF;
-	packetNumber = (unsigned int)packetID >> 4;
+	int sequenceNumber = pHeader->sequenceNumber;
+	unsigned char packetID = pHeader->packetID;
+	unsigned int packetCount = packetID & 0xF;
+	unsigned int packetNumber = (unsigned int)packetID >> 4;
 
 	if (packetNumber >= NET_WS_MAX_FRAGMENTS || packetCount > NET_WS_MAX_FRAGMENTS)
 	{
 		Con_NetPrintf("Malformed packet number (%i/%i)\n", packetNumber + 1, packetCount);
 		return FALSE;
 	}
+
 	if (gNetSplit.currentSequence == -1 || sequenceNumber != gNetSplit.currentSequence)
 	{
 		gNetSplit.currentSequence = pHeader->sequenceNumber;
@@ -963,23 +860,17 @@ qboolean NET_GetLong(unsigned char *pData, int size, int *outSize)
 
 qboolean NET_QueuePacket(netsrc_t sock)
 {
-	int ret;
-	struct sockaddr from;
-	socklen_t fromlen;
-	SOCKET net_socket;
-	int protocol;
+	int ret = -1;
 	unsigned char buf[MAX_UDP_PACKET];
 
-#ifdef REHLDS_FIXES
-	ret = -1;
-#endif
-
 #ifdef _WIN32
-	for (protocol = 0; protocol < 2; protocol++)
+	for (int protocol = 0; protocol < 2; protocol++)
 #else
-	for (protocol = 0; protocol < 1; protocol++)
+	for (int protocol = 0; protocol < 1; protocol++)
 #endif // _WIN32
 	{
+		SOCKET net_socket;
+
 		if (protocol == 0)
 			net_socket = ip_sockets[sock];
 #ifdef _WIN32
@@ -990,7 +881,8 @@ qboolean NET_QueuePacket(netsrc_t sock)
 		if (net_socket == INV_SOCK)
 			continue;
 
-		fromlen = sizeof(from);
+		struct sockaddr from;
+		socklen_t fromlen = sizeof(from);
 		ret = CRehldsPlatformHolder::get()->recvfrom(net_socket, (char *)buf, sizeof buf, 0, &from, &fromlen);
 		if (ret == -1)
 		{
@@ -1055,7 +947,7 @@ qboolean NET_QueuePacket(netsrc_t sock)
 	return NET_GetLong(in_message.data, ret, &in_message.cursize);
 }
 
-DLL_EXPORT int NET_Sleep_Timeout(void)
+DLL_EXPORT int NET_Sleep_Timeout()
 {
 	static int32 lasttime;
 	static int numFrames;
@@ -1076,7 +968,7 @@ DLL_EXPORT int NET_Sleep_Timeout(void)
 	{
 		lasttime = curtime;
 	}
-	
+
 	fd_set fdset;
 	FD_ZERO(&fdset);
 
@@ -1123,15 +1015,12 @@ DLL_EXPORT int NET_Sleep_Timeout(void)
 	return res;
 }
 
-int NET_Sleep(void)
+int NET_Sleep()
 {
 	fd_set fdset;
-	struct timeval tv;
-	SOCKET number;
-
 	FD_ZERO(&fdset);
-	number = 0;
 
+	SOCKET number = 0;
 	for (int sock = 0; sock < NS_MAX; sock++)
 	{
 		SOCKET net_socket = ip_sockets[sock];
@@ -1155,51 +1044,99 @@ int NET_Sleep(void)
 #endif // _WIN32
 	}
 
+	struct timeval tv;
 	tv.tv_sec = 0;
 	tv.tv_usec = 20 * 1000;
 
 	return select((int)(number + 1), &fdset, NULL, NULL, net_sleepforever == 0 ? &tv : NULL);
 }
 
-void NET_StartThread(void)
+#ifdef _WIN32
+
+DWORD WINAPI NET_ThreadMain(LPVOID lpThreadParameter)
+{
+	while (true)
+	{
+		while (NET_Sleep())
+		{
+			qboolean bret = FALSE;
+			for (int sock = 0; sock < NS_MAX; sock++)
+			{
+				NET_ThreadLock();
+
+				bret = NET_QueuePacket((netsrc_t)sock);
+				if (bret)
+				{
+					net_messages_t *pmsg = NET_AllocMsg(in_message.cursize);
+					pmsg->next = nullptr;
+					Q_memcpy(pmsg->buffer, in_message.data, in_message.cursize);
+					Q_memcpy(&pmsg->from, &in_from, sizeof(pmsg->from));
+
+					// add to tail of the list
+					net_messages_t *p = messages[sock];
+					if (p)
+					{
+						while (p->next)
+							p = p->next;
+
+						p->next = pmsg;
+					}
+					// add to head
+					else
+					{
+						messages[sock] = pmsg;
+					}
+				}
+
+				NET_ThreadUnlock();
+			}
+
+			if (!bret)
+				break;
+		}
+
+		Sys_Sleep(1);
+	}
+
+	return 0;
+}
+
+#endif // _WIN32
+
+void NET_StartThread()
 {
 	if (use_thread)
 	{
 		if (!net_thread_initialized)
 		{
 			net_thread_initialized = TRUE;
-			Sys_Error("%s: -netthread is not reversed yet", __func__);
+
 #ifdef _WIN32
-			/*
 			InitializeCriticalSection(&net_cs);
-			hThread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)NET_ThreadMain, 0, 0, &ThreadId);
-			if (!hThread)
+			hNetThread = CreateThread(0, 0, NET_ThreadMain, 0, 0, &dwNetThreadId);
+			if (!hNetThread)
 			{
 				DeleteCriticalSection(&net_cs);
-				net_thread_initialized = 0;
-				use_thread = 0;
+				net_thread_initialized = FALSE;
+				use_thread = FALSE;
 				Sys_Error("%s: Couldn't initialize network thread, run without -netthread\n", __func__);
 			}
-			*/
 #endif // _WIN32
 		}
 	}
 }
 
-void NET_StopThread(void)
+void NET_StopThread()
 {
 	if (use_thread)
 	{
 		if (net_thread_initialized)
 		{
 #ifdef _WIN32
-			/*
-			TerminateThread(hThread, 0);
+			TerminateThread(hNetThread, 0);
 			DeleteCriticalSection(&net_cs);
-			*/
 #endif // _WIN32
 			net_thread_initialized = FALSE;
-			Sys_Error("%s: -netthread is not reversed yet", __func__);
 		}
 	}
 }
@@ -1214,9 +1151,9 @@ net_messages_t *NET_AllocMsg(int size)
 	net_messages_t *pmsg;
 	if (size <= MSG_QUEUE_SIZE && normalqueue)
 	{
-		pmsg = normalqueue->next;
-		normalqueue->buffersize = size;
-		normalqueue = pmsg;
+		pmsg = normalqueue;
+		pmsg->buffersize = size;
+		normalqueue = pmsg->next;
 	}
 	else
 	{
@@ -1246,7 +1183,6 @@ void NET_FreeMsg(net_messages_t *pmsg)
 
 qboolean NET_GetPacket(netsrc_t sock)
 {
-	net_messages_t *pmsg;
 	qboolean bret;
 
 	NET_AdjustLag();
@@ -1273,12 +1209,12 @@ qboolean NET_GetPacket(netsrc_t sock)
 	{
 		Q_memcpy(net_message.data, in_message.data, in_message.cursize);
 		net_message.cursize = in_message.cursize;
-		Q_memcpy(&net_from, &in_from, 0x14u);
+		Q_memcpy(&net_from, &in_from, sizeof(netadr_t));
 		NET_ThreadUnlock();
 		return bret;
 	}
 
-	pmsg = messages[sock];
+	net_messages_t *pmsg = messages[sock];
 	if (pmsg)
 	{
 		net_message.cursize = pmsg->buffersize;
@@ -1287,20 +1223,19 @@ qboolean NET_GetPacket(netsrc_t sock)
 		net_from = pmsg->from;
 		msg_readcount = 0;
 		NET_FreeMsg(pmsg);
-		bret = 1;
+		bret = TRUE;
 	}
 	NET_ThreadUnlock();
 	return bret;
 }
 
-void NET_AllocateQueues(void)
+void NET_AllocateQueues()
 {
-	net_messages_t *p;
 	for (int i = 0; i < NUM_MSG_QUEUES; i++)
 	{
-		p = (net_messages_t *)Mem_ZeroMalloc(sizeof(net_messages_t));
+		net_messages_t *p = (net_messages_t *)Mem_ZeroMalloc(sizeof(net_messages_t));
 		p->buffer = (unsigned char *)Mem_ZeroMalloc(MSG_QUEUE_SIZE);
-		p->preallocated = 1;
+		p->preallocated = TRUE;
 		p->next = normalqueue;
 		normalqueue = p;
 	}
@@ -1308,8 +1243,10 @@ void NET_AllocateQueues(void)
 	NET_StartThread();
 }
 
-void NET_FlushQueues(void)
+void NET_FlushQueues()
 {
+	NET_StopThread();
+
 	for (int i = 0; i < NS_MAX; i++)
 	{
 		net_messages_t *p = messages[i];
@@ -1343,26 +1280,23 @@ int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, c
 	if (sock == NS_SERVER && len > MAX_ROUTEABLE_PACKET)
 	{
 		// yep
-		char packet[MAX_ROUTEABLE_PACKET];
-		int totalSent, ret, size, packetCount, packetNumber;
-		SPLITPACKET *pPacket;
-
 		gSequenceNumber++;
 		if (gSequenceNumber < 0)
 		{
 			gSequenceNumber = 1;
 		}
 
-		pPacket = (SPLITPACKET *)packet;
+		char packet[MAX_ROUTEABLE_PACKET];
+		SPLITPACKET *pPacket = (SPLITPACKET *)packet;
 		pPacket->netID = NET_HEADER_FLAG_SPLITPACKET;
 		pPacket->sequenceNumber = gSequenceNumber;
-		packetNumber = 0;
-		totalSent = 0;
-		packetCount = (len + SPLIT_SIZE - 1) / SPLIT_SIZE;
+		int packetNumber = 0;
+		int totalSent = 0;
+		int packetCount = (len + SPLIT_SIZE - 1) / SPLIT_SIZE;
 
 		while (len > 0)
 		{
-			size = Q_min(int(SPLIT_SIZE), len);
+			int size = Q_min(int(SPLIT_SIZE), len);
 
 			pPacket->packetID = (packetNumber << 4) + packetCount;
 
@@ -1383,7 +1317,7 @@ int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, c
 					NET_AdrToString(adr));
 			}
 
-			ret = CRehldsPlatformHolder::get()->sendto(s, packet, size + sizeof(SPLITPACKET), flags, to, tolen);
+			int ret = CRehldsPlatformHolder::get()->sendto(s, packet, size + sizeof(SPLITPACKET), flags, to, tolen);
 			if (ret < 0)
 			{
 				return ret;
@@ -1405,6 +1339,7 @@ int NET_SendLong(netsrc_t sock, SOCKET s, const char *buf, int len, int flags, c
 	return nSend;
 }
 
+
 void EXT_FUNC NET_SendPacket_api(unsigned int length, void *data, const netadr_t &to)
 {
 	NET_SendPacket(NS_SERVER, length, data, to);
@@ -1412,16 +1347,13 @@ void EXT_FUNC NET_SendPacket_api(unsigned int length, void *data, const netadr_t
 
 void NET_SendPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 {
-	int ret;
-	struct sockaddr addr;
-	SOCKET net_socket;
-
 	if (to.type == NA_LOOPBACK)
 	{
 		NET_SendLoopPacket(sock, length, data, to);
 		return;
 	}
 
+	SOCKET net_socket;
 	if (to.type == NA_BROADCAST)
 	{
 		net_socket = ip_sockets[sock];
@@ -1453,9 +1385,10 @@ void NET_SendPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 		Sys_Error("%s: bad address type", __func__);
 	}
 
+	struct sockaddr addr;
 	NetadrToSockadr(&to, &addr);
 
-	ret = NET_SendLong(sock, net_socket, (const char *)data, length, 0, &addr, sizeof(addr));
+	int ret = NET_SendLong(sock, net_socket, (const char *)data, length, 0, &addr, sizeof(addr));
 	if (ret == -1)
 	{
 		int err = NET_GetLastError();
@@ -1494,13 +1427,11 @@ void NET_SendPacket(netsrc_t sock, int length, void *data, const netadr_t& to)
 	}
 }
 
+
 SOCKET NET_IPSocket(char *net_interface, int port, qboolean multicast)
 {
 	SOCKET newsocket;
-	struct sockaddr_in address;
 	qboolean _true = TRUE;
-	int i = 1;
-	int err;
 
 #ifdef _WIN32
 	if ((newsocket = CRehldsPlatformHolder::get()->socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET)
@@ -1508,7 +1439,7 @@ SOCKET NET_IPSocket(char *net_interface, int port, qboolean multicast)
 	if ((newsocket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET)
 #endif // _WIN32
 	{
-		err = NET_GetLastError();
+		int err = NET_GetLastError();
 		if (err != WSAEAFNOSUPPORT)
 		{
 			Con_Printf("WARNING: UDP_OpenSocket: port: %d socket: %s", port, NET_ErrorString(err));
@@ -1526,6 +1457,7 @@ SOCKET NET_IPSocket(char *net_interface, int port, qboolean multicast)
 		return INV_SOCK;
 	}
 
+	qboolean i = TRUE;
 #ifdef _WIN32
 	if (CRehldsPlatformHolder::get()->setsockopt(newsocket, SOL_SOCKET, SO_BROADCAST, (char *)&i, sizeof(i)) == SOCKET_ERROR)
 #else
@@ -1552,11 +1484,11 @@ SOCKET NET_IPSocket(char *net_interface, int port, qboolean multicast)
 #ifndef _WIN32
 	if (COM_CheckParm("-tos"))
 	{
-		i = 16;
+		int i = IPTOS_LOWDELAY;
 		Con_Printf("Enabling LOWDELAY TOS option\n");
 		if (setsockopt(newsocket, IPPROTO_IP, IP_TOS, (char *)&i, sizeof(i)) == SOCKET_ERROR)
 		{
-			err = NET_GetLastError();
+			int err = NET_GetLastError();
 			if (err != WSAENOPROTOOPT)
 				Con_Printf("WARNING: UDP_OpenSocket: port: %d  setsockopt IP_TOS: %s\n", port, NET_ErrorString(err));
 			return INV_SOCK;
@@ -1564,12 +1496,14 @@ SOCKET NET_IPSocket(char *net_interface, int port, qboolean multicast)
 	}
 #endif // _WIN32
 
+	struct sockaddr_in address;
+
 	if (net_interface && *net_interface && Q_stricmp(net_interface, "localhost"))
 		NET_StringToSockaddr(net_interface, (sockaddr *)&address);
 	else
 		address.sin_addr.s_addr = INADDR_ANY;
 
-	if (port == -1)
+	if (port == -1) // TODO: Always false?
 		address.sin_port = 0;
 	else
 		address.sin_port = htons((u_short)port);
@@ -1591,19 +1525,19 @@ SOCKET NET_IPSocket(char *net_interface, int port, qboolean multicast)
 		return INV_SOCK;
 	}
 
-	i = COM_CheckParm("-loopback") != 0;
+	qboolean bLoopBack = COM_CheckParm("-loopback") != 0;
 #ifdef _WIN32
-	if (CRehldsPlatformHolder::get()->setsockopt(newsocket, IPPROTO_IP, IP_MULTICAST_LOOP, (char *)&i, sizeof(i)) == SOCKET_ERROR)
+	if (CRehldsPlatformHolder::get()->setsockopt(newsocket, IPPROTO_IP, IP_MULTICAST_LOOP, (char *)&bLoopBack, sizeof(bLoopBack)) == SOCKET_ERROR)
 #else
-	if (setsockopt(newsocket, IPPROTO_IP, IP_MULTICAST_LOOP, (char *)&i, sizeof(i)) == SOCKET_ERROR)
+	if (setsockopt(newsocket, IPPROTO_IP, IP_MULTICAST_LOOP, (char *)&bLoopBack, sizeof(bLoopBack)) == SOCKET_ERROR)
 #endif // _WIN32
 	{
 		Con_DPrintf("WARNING: UDP_OpenSocket: port %d setsockopt IP_MULTICAST_LOOP: %s\n", port, NET_ErrorString(NET_GetLastError()));
 	}
 
 #if !defined _WIN32 && defined REHLDS_FIXES
-	i = IP_PMTUDISC_DONT;
-	if (setsockopt(newsocket, IPPROTO_IP, IP_MTU_DISCOVER, (char *)&i, sizeof(i)) == SOCKET_ERROR)
+	int j = IP_PMTUDISC_DONT;
+ 	if (setsockopt(newsocket, IPPROTO_IP, IP_MTU_DISCOVER, (char *)&j, sizeof(j)) == SOCKET_ERROR)
 	{
 		Con_Printf("WARNING: UDP_OpenSocket: port %d  setsockopt IP_MTU_DISCOVER: %s\n", port, NET_ErrorString(NET_GetLastError()));
 	}
@@ -1612,28 +1546,25 @@ SOCKET NET_IPSocket(char *net_interface, int port, qboolean multicast)
 	return newsocket;
 }
 
-void NET_OpenIP(void)
+void NET_OpenIP()
 {
 	//cvar_t *ip;//unused?
-	int port;
-	int dedicated;
 	int sv_port = 0;
 	int cl_port = 0;
 	//int mc_port;//unused?
-	static qboolean bFirst = TRUE;
 
-	dedicated = g_pcls.state == ca_dedicated;
+	int dedicated = g_pcls.state == ca_dedicated;
 
 	NET_ThreadLock();
 
 	if (ip_sockets[NS_SERVER] == INV_SOCK)
 	{
-		port = (int)iphostport.value;
+		int port = (int)iphostport.value;
 
-		if (!port)
+		if (!NET_CheckPort(port))
 		{
 			port = (int)hostport.value;
-			if (!port)
+			if (!NET_CheckPort(port))
 			{
 				port = (int)defport.value;
 				hostport.value = defport.value;
@@ -1657,12 +1588,12 @@ void NET_OpenIP(void)
 
 	if (ip_sockets[NS_CLIENT] == INV_SOCK)
 	{
-		port = (int)ip_clientport.value;
+		int port = (int)ip_clientport.value;
 
-		if (!port)
+		if (!NET_CheckPort(port))
 		{
 			port = (int)clientport.value;
-			if (!port)
+			if (!NET_CheckPort(port))
 				port = -1;
 		}
 		ip_sockets[NS_CLIENT] = NET_IPSocket(ipname.string, port, FALSE);
@@ -1680,6 +1611,7 @@ void NET_OpenIP(void)
 
 	NET_ThreadUnlock();
 
+	static qboolean bFirst = TRUE;
 	if (bFirst)
 	{
 		bFirst = FALSE;
@@ -1694,7 +1626,6 @@ SOCKET NET_IPXSocket(int hostshort)
 	int err;
 	u_long optval = 1;
 	SOCKET newsocket;
-	SOCKADDR_IPX address;
 
 	if((newsocket = CRehldsPlatformHolder::get()->socket(PF_IPX, SOCK_DGRAM, NSPROTO_IPX)) == INVALID_SOCKET)
 	{
@@ -1726,6 +1657,7 @@ SOCKET NET_IPXSocket(int hostshort)
 		return INV_SOCK;
 	}
 
+	SOCKADDR_IPX address;
 	address.sa_family = AF_IPX;
 	Q_memset(address.sa_netnum, 0, 4);
 	Q_memset(address.sa_nodenum, 0, 6);
@@ -1744,22 +1676,19 @@ SOCKET NET_IPXSocket(int hostshort)
 	return newsocket;
 }
 
-void NET_OpenIPX(void)
+void NET_OpenIPX()
 {
-	int port;
-	int dedicated;
-
-	dedicated = g_pcls.state == ca_dedicated;
+	int dedicated = g_pcls.state == ca_dedicated;
 
 	NET_ThreadLock();
 
 	if (ipx_sockets[NS_SERVER] == INV_SOCK)
 	{
-		port = ipx_hostport.value;
-		if (!port)
+		int port = ipx_hostport.value;
+		if (!NET_CheckPort(port))
 		{
 			port = hostport.value;
-			if (!port)
+			if (!NET_CheckPort(port))
 			{
 				hostport.value = defport.value;
 				port = defport.value;
@@ -1777,11 +1706,11 @@ void NET_OpenIPX(void)
 
 	if (ipx_sockets[NS_CLIENT] == INV_SOCK)
 	{
-		port = ipx_clientport.value;
-		if (!port)
+		int port = ipx_clientport.value;
+		if (!NET_CheckPort(port))
 		{
 			port = clientport.value;
-			if (!port)
+			if (!NET_CheckPort(port))
 				port = -1;
 		}
 		ipx_sockets[NS_CLIENT] = NET_IPXSocket(port);
@@ -1795,7 +1724,7 @@ void NET_OpenIPX(void)
 
 #endif // _WIN32
 
-void NET_GetLocalAddress(void)
+void NET_GetLocalAddress()
 {
 	char buff[512];
 	struct sockaddr_in address;
@@ -1888,15 +1817,23 @@ void NET_GetLocalAddress(void)
 #endif //_WIN32
 }
 
-int NET_IsConfigured(void)
+int NET_IsConfigured()
 {
 	return net_configured;
+}
+
+bool NET_CheckPort(int port)
+{
+#ifdef REHLDS_FIXES
+	return port > 0 && port <= USHRT_MAX;
+#else
+	return port != 0;
+#endif
 }
 
 void NET_Config(qboolean multiplayer)
 {
 	static qboolean old_config;
-	static qboolean bFirst = TRUE;
 
 	if (old_config == multiplayer)
 	{
@@ -1913,6 +1850,8 @@ void NET_Config(qboolean multiplayer)
 		if (!noipx)
 			NET_OpenIPX();
 #endif //_WIN32
+
+		static qboolean bFirst = TRUE;
 		if (bFirst)
 		{
 			bFirst = FALSE;
@@ -1950,7 +1889,7 @@ void NET_Config(qboolean multiplayer)
 	net_configured = multiplayer ? 1 : 0;
 }
 
-void MaxPlayers_f(void)
+void MaxPlayers_f()
 {
 	if (Cmd_Argc() != 2)
 	{
@@ -1983,13 +1922,9 @@ void MaxPlayers_f(void)
 		Cvar_Set("deathmatch", "1");
 }
 
-void NET_Init(void)
+void NET_Init()
 {
-#ifdef HOOK_ENGINE
-	Cmd_AddCommand("maxplayers", (xcommand_t)GetOriginalFuncAddrOrDefault("MaxPlayers_f", (void *)MaxPlayers_f));
-#else
 	Cmd_AddCommand("maxplayers", MaxPlayers_f);
-#endif // HOOK_ENGINE
 
 	Cvar_RegisterVariable(&net_address);
 	Cvar_RegisterVariable(&ipname);
@@ -2012,10 +1947,8 @@ void NET_Init(void)
 	Cvar_RegisterVariable(&net_graphpos);
 
 	if (COM_CheckParm("-netthread"))
-	{
-		use_thread = 1;
-		Sys_Error("%s: -netthread is not reversed yet", __func__);
-	}
+		use_thread = TRUE;
+
 	if (COM_CheckParm("-netsleep"))
 		net_sleepforever = 0;
 
@@ -2073,7 +2006,7 @@ void NET_ClearLagData(qboolean bClient, qboolean bServer)
 	NET_ThreadUnlock();
 }
 
-void NET_Shutdown(void)
+void NET_Shutdown()
 {
 	NET_ThreadLock();
 
@@ -2086,13 +2019,15 @@ void NET_Shutdown(void)
 	NET_FlushQueues();
 }
 
-qboolean NET_JoinGroup(netsrc_t sock, netadr_t& addr)
+NOXREF qboolean NET_JoinGroup(netsrc_t sock, netadr_t& addr)
 {
+	NOXREFCHECK;
+
 	ip_mreq mreq;
-	SOCKET net_socket = ip_sockets[sock];
 	SIN_SET_ADDR(&mreq.imr_multiaddr, *(unsigned int*)&addr.ip[0]);
 	SIN_SET_ADDR(&mreq.imr_interface, 0);
 
+	SOCKET net_socket = ip_sockets[sock];
 	if (CRehldsPlatformHolder::get()->setsockopt(net_socket, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq)) == SOCKET_ERROR)
 	{
 		int err = NET_GetLastError();
@@ -2106,17 +2041,18 @@ qboolean NET_JoinGroup(netsrc_t sock, netadr_t& addr)
 	return TRUE;
 }
 
-qboolean NET_LeaveGroup(netsrc_t sock, netadr_t& addr)
+NOXREF qboolean NET_LeaveGroup(netsrc_t sock, netadr_t& addr)
 {
+	NOXREFCHECK;
+
 	ip_mreq mreq;
-	SOCKET net_socket = ip_sockets[sock];
 	SIN_SET_ADDR(&mreq.imr_multiaddr, *(unsigned int*)&addr.ip[0]);
 	SIN_SET_ADDR(&mreq.imr_interface, 0);
 
-	if (CRehldsPlatformHolder::get()->setsockopt(net_socket, 0, 6, (char *)&mreq, sizeof(mreq)) != SOCKET_ERROR)
+	SOCKET net_socket = ip_sockets[sock];
+	if (CRehldsPlatformHolder::get()->setsockopt(net_socket, IPPROTO_IP, IP_DROP_MEMBERSHIP, (char *)&mreq, sizeof(mreq)) != SOCKET_ERROR)
 	{
-		int err = NET_GetLastError();
-		if (err != WSAEAFNOSUPPORT)
+		if (NET_GetLastError() != WSAEAFNOSUPPORT)
 		{
 			return FALSE;
 		}
