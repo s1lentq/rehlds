@@ -1977,29 +1977,29 @@ int SV_CheckForDuplicateSteamID(client_t *client)
 
 int SV_CheckForDuplicateNames(char *userinfo, qboolean bIsReconnecting, int nExcludeSlot)
 {
-	const char *val;
-	int i;
-	client_t *client;
 	int dupc = 0;
-	char rawname[MAX_NAME];
-	char newname[MAX_NAME];
 	int changed = FALSE;
 
-	val = Info_ValueForKey(userinfo, "name");
+	const char *val = Info_ValueForKey(userinfo, "name");
+
+	char rawname[MAX_NAME];
 	Q_strncpy(rawname, val, MAX_NAME - 1);
 
 	while (true)
 	{
-		for (i = 0, client = g_psvs.clients; i < g_psvs.maxclients; i++, client++)
+		int clientId = 0;
+		client_t *client = &g_psvs.clients[0];
+		for (; clientId < g_psvs.maxclients; clientId++, client++)
 		{
-			if (client->connected && !(i == nExcludeSlot && bIsReconnecting) && !Q_stricmp(client->name, val))
+			if (client->connected && !(clientId == nExcludeSlot && bIsReconnecting) && !Q_stricmp(client->name, val))
 				break;
 		}
 
 		// no duplicates for current name
-		if (i == g_psvs.maxclients)
+		if (clientId == g_psvs.maxclients)
 			return changed;
 
+		char newname[MAX_NAME];
 		Q_snprintf(newname, sizeof(newname), "(%d)%-0.*s", ++dupc, 28, rawname);
 #ifdef REHLDS_FIXES
 		// Fix possibly incorrectly cut UTF8 chars
@@ -2121,7 +2121,11 @@ int SV_CheckUserInfo(netadr_t *adr, char *userinfo, qboolean bIsReconnecting, in
 	}
 #endif
 
+#ifdef REHLDS_FIXES
+	if (name[0] == 0 || !Q_stricmp(name, "console") || Q_strstr(name, "..") || Q_strstr(name, "\"") || Q_strstr(name, "\\"))
+#else // REHLDS_FIXES
 	if (name[0] == 0 || !Q_stricmp(name, "console") || Q_strstr(name, "..") != NULL)
+#endif // REHLDS_FIXES
 	{
 		Info_SetValueForKey(userinfo, "name", "unnamed", MAX_INFO_STRING);
 	}
@@ -4902,7 +4906,7 @@ void SV_ExtractFromUserinfo(client_t *cl)
 
 	if (newname[0] == '\0' || !Q_stricmp(newname, "console")
 #ifdef REHLDS_FIXES
-		|| Q_strstr(newname, "..") != NULL)
+		|| Q_strstr(newname, "..") || Q_strstr(newname, "\"") || Q_strstr(newname, "\\"))
 #else // REHLDS_FIXES
 		)
 #endif // REHLDS_FIXES
@@ -5037,9 +5041,6 @@ size_t SV_CountResourceByType(resourcetype_t type, resource_t **pResourceList, s
 	for (int i = 0; i < g_psv.num_resources; i++, r++)
 	{
 		if (r->type != type)
-			continue;
-
-		if (r->type == t_decal && r->nIndex >= MAX_DECALS)
 			continue;
 
 		if (pResourceList)
@@ -7803,6 +7804,9 @@ void SV_Init(void)
 	Cvar_RegisterVariable(&sv_rehlds_attachedentities_playeranimationspeed_fix);
 	Cvar_RegisterVariable(&sv_rehlds_local_gametime);
 	Cvar_RegisterVariable(&sv_rehlds_send_mapcycle);
+	
+	Cvar_RegisterVariable(&sv_rollspeed);
+	Cvar_RegisterVariable(&sv_rollangle);
 #endif
 
 	for (int i = 0; i < MAX_MODELS; i++)
