@@ -1803,8 +1803,15 @@ int g_oldest_challenge = 0;
 #endif
 
 bool EXT_FUNC SV_CheckChallenge_api(const netadr_t &adr, int nChallengeValue) {
-	netadr_t localAdr = adr;
-	return SV_CheckChallenge(&localAdr, nChallengeValue) != 0;
+	if (NET_IsLocalAddress(adr))
+		return TRUE;
+
+	for (int i = 0; i < MAX_CHALLENGES; i++) {
+		if (NET_CompareBaseAdr(adr, g_rg_sv_challenges[i].adr))
+			return nChallengeValue == g_rg_sv_challenges[i].challenge;
+	}
+
+	return FALSE;
 }
 
 int SV_CheckChallenge(netadr_t *adr, int nChallengeValue)
@@ -1813,7 +1820,7 @@ int SV_CheckChallenge(netadr_t *adr, int nChallengeValue)
 		Sys_Error("%s:  Null address\n", __func__);
 
 	if (NET_IsLocalAddress(*adr))
-		return 1;
+		return TRUE;
 
 	for (int i = 0; i < MAX_CHALLENGES; i++)
 	{
@@ -1822,13 +1829,13 @@ int SV_CheckChallenge(netadr_t *adr, int nChallengeValue)
 			if (nChallengeValue != g_rg_sv_challenges[i].challenge)
 			{
 				SV_RejectConnection(adr, "Bad challenge.\n");
-				return 0;
+				return FALSE;
 			}
-			return 1;
+			return TRUE;
 		}
 	}
 	SV_RejectConnection(adr, "No challenge for your address.\n");
-	return 0;
+	return FALSE;
 }
 
 int SV_CheckIPRestrictions(netadr_t *adr, int nAuthProtocol)
@@ -1985,12 +1992,20 @@ int SV_CheckForDuplicateSteamID(client_t *client)
 	return -1;
 }
 
-int SV_CheckForDuplicateNames(char *userinfo, qboolean bIsReconnecting, int nExcludeSlot)
+qboolean SV_CheckForDuplicateNames(char *userinfo, qboolean bIsReconnecting, int nExcludeSlot)
 {
 	int dupc = 0;
-	int changed = FALSE;
+	qboolean changed = FALSE;
 
 	const char *val = Info_ValueForKey(userinfo, "name");
+
+#ifndef REHLDS_FIXES
+ 	if (!val || val[0] == '\0' || Q_strstr(val, "..") != NULL || Q_strstr(val, "\"") != NULL || Q_strstr(val, "\\") != NULL)
+	{
+		Info_SetValueForKey(userinfo, "name", "unnamed", MAX_INFO_STRING);
+		return TRUE;
+	}
+#endif // REHLDS_FIXES
 
 	char rawname[MAX_NAME];
 	Q_strncpy(rawname, val, MAX_NAME - 1);
@@ -2011,6 +2026,7 @@ int SV_CheckForDuplicateNames(char *userinfo, qboolean bIsReconnecting, int nExc
 
 		char newname[MAX_NAME];
 		Q_snprintf(newname, sizeof(newname), "(%d)%-0.*s", ++dupc, 28, rawname);
+
 #ifdef REHLDS_FIXES
 		// Fix possibly incorrectly cut UTF8 chars
 		if (!Q_UnicodeValidate(newname))
@@ -2018,6 +2034,7 @@ int SV_CheckForDuplicateNames(char *userinfo, qboolean bIsReconnecting, int nExc
 			Q_UnicodeRepair(newname);
 		}
 #endif // REHLDS_FIXES
+
 		Info_SetValueForKey(userinfo, "name", newname, MAX_INFO_STRING);
 		val = Info_ValueForKey(userinfo, "name");
 		changed = TRUE;
@@ -3569,11 +3586,13 @@ void SV_ReadPackets(void)
 {
 	while (NET_GetPacket(NS_SERVER))
 	{
+#ifndef REHLDS_FIXES
 		if (SV_FilterPacket())
 		{
 			SV_SendBan();
 			continue;
 		}
+#endif
 
 		bool pass = g_RehldsHookchains.m_PreprocessPacket.callChain(NET_GetPacketPreprocessor, net_message.data, net_message.cursize, net_from);
 		if (!pass)
@@ -3582,8 +3601,16 @@ void SV_ReadPackets(void)
 		if (*(uint32 *)net_message.data == 0xFFFFFFFF)
 		{
 			// Connectionless packet
-			if (SV_CheckConnectionLessRateLimits(net_from))
+			if (g_RehldsHookchains.m_SV_CheckConnectionLessRateLimits.callChain([](netadr_t& net_from, const uint8_t *, int) { return SV_CheckConnectionLessRateLimits(net_from); }, net_from, net_message.data, net_message.cursize))
 			{
+#ifdef REHLDS_FIXES
+				if (SV_FilterPacket())
+				{
+					SV_SendBan();
+					continue;
+				}
+#endif
+
 				Steam_HandleIncomingPacket(net_message.data, net_message.cursize, ntohl(*(u_long *)&net_from.ip[0]), htons(net_from.port));
 				SV_ConnectionlessPacket();
 			}
@@ -4545,28 +4572,34 @@ void SV_WriteEntitiesToClient(client_t *client, sizebuf_t *msg)
 	}
 
 #ifdef REHLDS_FIXES
-	if (sv_rehlds_attachedentities_playeranimationspeed_fix.value != 0)
+	int attachedEntCount[MAX_CLIENTS + 1] = {};
+	for (int i = curPack->num_entities - 1; i >= 0; i--)
 	{
-		int attachedEntCount[MAX_CLIENTS + 1] = {};
-		for (int i = curPack->num_entities - 1; i >= 0; i--)
+		auto &entityState = curPack->entities[i];
+		if (entityState.number > MAX_CLIENTS)
 		{
-			auto &entityState = curPack->entities[i];
-			if (entityState.number > MAX_CLIENTS)
+			if (sv_rehlds_attachedentities_playeranimationspeed_fix.string[0] == '1'
+				&& entityState.movetype == MOVETYPE_FOLLOW
+				&& 1 <= entityState.aiment && entityState.aiment <= MAX_CLIENTS)
 			{
-				if (entityState.movetype == MOVETYPE_FOLLOW
-					&& 1 <= entityState.aiment && entityState.aiment <= MAX_CLIENTS)
-				{
-					attachedEntCount[entityState.aiment]++;
-				}
+				attachedEntCount[entityState.aiment]++;
 			}
-			else
+
+			// Prevent spam "Non-sprite set to glow!" in console on client-side
+			if (entityState.rendermode == kRenderGlow
+				&& (entityState.modelindex >= 0 && entityState.modelindex < MAX_MODELS)
+				&& g_psv.models[entityState.modelindex]->type != mod_sprite)
 			{
-				if (attachedEntCount[entityState.number] != 0)
-				{
-					// Each attached entity causes StudioProcessGait for player
-					// But this will slow down normal animation predicting on client
-					entityState.framerate /= (1 + attachedEntCount[entityState.number]);
-				}
+				entityState.rendermode = kRenderNormal;
+			}
+		}
+		else
+		{
+			if (attachedEntCount[entityState.number] != 0)
+			{
+				// Each attached entity causes StudioProcessGait for player
+				// But this will slow down normal animation predicting on client
+				entityState.framerate /= (1 + attachedEntCount[entityState.number]);
 			}
 		}
 	}
@@ -5800,7 +5833,7 @@ void EXT_FUNC SV_ActivateServer_internal(int runPhysics)
 	if (mapchangecfgfile.string && *mapchangecfgfile.string)
 	{
 		AlertMessage(at_console, "Executing map change config file\n");
-		Q_sprintf(szCommand, "exec %s\n", mapchangecfgfile.string);
+		Q_snprintf(szCommand, sizeof(szCommand), "exec %s\n", mapchangecfgfile.string);
 		Cbuf_AddText(szCommand);
 	}
 
@@ -6816,8 +6849,26 @@ void SV_RemoveId_f(void)
 
 void SV_WriteId_f(void)
 {
+	if (bannedcfgfile.string[0] == '/' ||
+		Q_strstr(bannedcfgfile.string, ":") ||
+		Q_strstr(bannedcfgfile.string, "..") ||
+		Q_strstr(bannedcfgfile.string, "\\"))
+	{
+		Con_Printf("Couldn't open %s (contains illegal characters).\n", bannedcfgfile.string);
+		return;
+	}
+
 	char name[MAX_PATH];
-	Q_snprintf(name, MAX_PATH, "%s", bannedcfgfile.string);
+	Q_strlcpy(name, bannedcfgfile.string);
+	COM_DefaultExtension(name, ".cfg");
+
+	const char *pszFileExt = COM_FileExtension(name);
+	if (Q_stricmp(pszFileExt, "cfg") != 0)
+	{
+		Con_Printf("Couldn't open %s (wrong file extension, must be .cfg).\n", name);
+		return;
+	}
+
 	Con_Printf("Writing %s.\n", name);
 
 	FILE *f = FS_Open(name, "wt");
