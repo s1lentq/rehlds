@@ -865,6 +865,10 @@ IRehldsHookRegistry_GetEntityInit* CRehldsHookchains::GetEntityInit() {
 	return &m_GetEntityInit;
 }
 
+IRehldsHookRegistry_Netchan_OutOfBand* CRehldsHookchains::Netchan_OutOfBand() {
+	return &m_Netchan_OutOfBand;
+}
+
 void *CRehldsMemAlloc::Alloc(unsigned int size) {
 	return Mem_ZeroMalloc(size);
 }

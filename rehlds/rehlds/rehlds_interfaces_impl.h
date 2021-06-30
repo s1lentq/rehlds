@@ -370,8 +370,8 @@ public:
 	virtual int GetMaxEdicts();
 	virtual void SetMaxEdicts(int max_edicts);
 	virtual edict_t *GetEdict(int index);
-	virtual server_state_t GetState();
-	virtual void SetState(server_state_t st);
+	virtual int GetState();
+	virtual void SetState(int state);
 	virtual sizebuf_t *GetMulticastBuf();
 	virtual sizebuf_t *GetSpectatorBuf();
 	virtual sizebuf_t *GetSignonBuf();

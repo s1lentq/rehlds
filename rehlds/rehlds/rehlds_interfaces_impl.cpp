@@ -990,14 +990,14 @@ edict_t *EXT_FUNC CRehldsServerData::GetEdict(int index)
 	return &g_psv.edicts[index];
 }
 
-server_state_t EXT_FUNC CRehldsServerData::GetState()
+int EXT_FUNC CRehldsServerData::GetState()
 {
 	return g_psv.state;
 }
 
-void EXT_FUNC CRehldsServerData::SetState(server_state_t st)
+void EXT_FUNC CRehldsServerData::SetState(int state)
 {
-	g_psv.state = st;
+	g_psv.state = static_cast<server_state_t>(state);
 }
 
 sizebuf_t *EXT_FUNC CRehldsServerData::GetMulticastBuf()

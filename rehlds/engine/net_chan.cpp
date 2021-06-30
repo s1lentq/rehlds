@@ -71,7 +71,7 @@ void Netchan_UnlinkFragment(fragbuf_t *buf, fragbuf_t **list)
 	Con_Printf("%s: Couldn't find fragment\n", __func__);
 }
 
-void Netchan_OutOfBand(netsrc_t sock, netadr_t adr, int length, byte *data)
+void EXT_FUNC Netchan_OutOfBand_internal(netsrc_t sock, netadr_t &adr, int length, byte *data)
 {
 	sizebuf_t send;
 	byte send_buf[NET_MAX_PAYLOAD];
@@ -89,6 +89,11 @@ void Netchan_OutOfBand(netsrc_t sock, netadr_t adr, int length, byte *data)
 	{
 		NET_SendPacket(sock, send.cursize, send.data, adr);
 	}
+}
+
+void Netchan_OutOfBand(netsrc_t sock, netadr_t adr, int length, byte *data)
+{
+	g_RehldsHookchains.m_Netchan_OutOfBand.callChain(Netchan_OutOfBand_internal, sock, adr, length, data);
 }
 
 void Netchan_OutOfBandPrint(netsrc_t sock, netadr_t adr, char *format, ...)
