@@ -298,10 +298,20 @@ public:
 	EXT_FUNC virtual IRehldsHookRegistry_GetEntityInit* GetEntityInit();
 };
 
+class CRehldsMemAlloc : public IRehldsMemAlloc {
+public:
+	EXT_FUNC virtual void *Alloc(unsigned int size);
+	EXT_FUNC virtual void *Calloc(int num, unsigned int size);
+	EXT_FUNC virtual void *Realloc(void *blockptr, unsigned int size);
+	EXT_FUNC virtual void Free(void *ptr);
+	EXT_FUNC virtual char *CloneString(const char *pString);
+};
+
 extern CRehldsHookchains g_RehldsHookchains;
 extern RehldsFuncs_t g_RehldsApiFuncs;
 extern CRehldsServerStatic g_RehldsServerStatic;
 extern CRehldsServerData g_RehldsServerData;
+extern CRehldsMemAlloc g_RehldsMemAlloc;
 
 
 class CRehldsApi : public IRehldsApi {
@@ -313,6 +323,7 @@ public:
 	virtual IRehldsServerStatic* GetServerStatic();
 	virtual IRehldsServerData* GetServerData();
 	virtual IRehldsFlightRecorder* GetFlightRecorder();
+	virtual IRehldsMemAlloc* GetMem();
 };
 
 extern sizebuf_t* GetNetMessage_api();

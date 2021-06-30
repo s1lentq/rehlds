@@ -369,6 +369,10 @@ struct RehldsFuncs_t {
 	void(*MSG_BeginReading)();
 	double(*GetHostFrameTime)();
 	struct cmd_function_s *(*GetFirstCmdFunctionHandle)();
+	bool (*Info_SetValueForStarKey)(char *s, const char *key, const char *value, unsigned int maxsize);
+	void (*Info_RemovePrefixedKeys)(char *s, const char prefix);
+	void (*Info_RemoveKey)(char *s, const char *lookup);
+	bool (*Info_IsValid)(const char *s);
 };
 
 class IRehldsApi {
@@ -382,6 +386,7 @@ public:
 	virtual IRehldsServerStatic* GetServerStatic() = 0;
 	virtual IRehldsServerData* GetServerData() = 0;
 	virtual IRehldsFlightRecorder* GetFlightRecorder() = 0;
+	virtual IRehldsMemAlloc* GetMem() = 0;
 };
 
 #define VREHLDS_HLDS_API_VERSION "VREHLDS_HLDS_API_VERSION001"

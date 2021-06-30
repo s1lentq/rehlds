@@ -44,6 +44,53 @@ public:
 	virtual const netadr_t* GetRemoteAdr();
 	virtual sizebuf_t* GetMessageBuf();
 
+	virtual int GetPlayerSlot();
+	virtual void SetPlayerSlot(int slot);
+
+	virtual float GetLastReceived();
+	virtual void SetLastReceived(float lastreceived_time);
+	virtual bool IsTimedOut(float flAdjustTimeOutSeconds);
+
+	virtual float GetConnectTime();
+	virtual void SetConnectTime(float connect_time);
+
+	virtual double GetRate();
+	virtual void SetRate(double rate);
+
+	virtual double GetClearTime();
+	virtual void SetClearTime(double time);
+
+	virtual int GetIncomingSequence();
+	virtual void SetIncomingSequence(int value);
+
+	virtual int GetIncomingAcknowledged();
+	virtual void SetIncomingAcknowledged(int value);
+
+	virtual int GetIncomingReliableAcknowledged();
+	virtual void SetIncomingReliableAcknowledged(int value);
+
+	virtual int GetIncomingReliableSequence();
+	virtual void SetIncomingReliableSequence(int value);
+
+	virtual int GetOutgoingSequence();
+	virtual void SetOutgoingSequence(int value);
+
+	virtual int GetReliableSequence();
+	virtual void SetReliableSequence(int value);
+
+	virtual int GetLastReliableSequence();
+	virtual void SetLastReliableSequence(int value);
+
+	virtual void *GetConnectionStatusCtxPtr();
+	virtual void SetConnectionStatusCtxPtr(void *ctx);
+
+	virtual void *GetCallbackNetBlocksize();
+	virtual void SetCallbackNetBlocksize(int (*pfnFunction)(void *));
+
+	virtual int GetReliableLength();
+	virtual void SetReliableLength(int length);
+	virtual unsigned char *GetReliableBuf(int *nMaxSize);
+
 	virtual netchan_t* GetChan();
 
 public:

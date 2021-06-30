@@ -604,7 +604,166 @@ int EXT_FUNC CRehldsServerStatic::GetIndexOfClient_t(client_t* client)
 	return int(client - g_psvs.clients);
 }
 
+int CNetChan::GetPlayerSlot()
+{
+	return m_pNetChan->player_slot;
+}
 
+void CNetChan::SetPlayerSlot(int slot)
+{
+	m_pNetChan->player_slot = slot;
+}
+
+float CNetChan::GetLastReceived()
+{
+	return m_pNetChan->last_received;
+}
+
+void CNetChan::SetLastReceived(float lastreceived_time)
+{
+	m_pNetChan->last_received = lastreceived_time;
+}
+
+bool CNetChan::IsTimedOut(float flAdjustTimeOutSeconds)
+{
+	return ((realtime - m_pNetChan->last_received) > (sv_timeout.value + flAdjustTimeOutSeconds));
+}
+
+float CNetChan::GetConnectTime()
+{
+	return m_pNetChan->connect_time;
+}
+
+void CNetChan::SetConnectTime(float connect_time)
+{
+	m_pNetChan->connect_time = connect_time;
+}
+
+double CNetChan::GetRate()
+{
+	return m_pNetChan->rate;
+}
+
+void CNetChan::SetRate(double rate)
+{
+	m_pNetChan->rate = rate;
+}
+
+double CNetChan::GetClearTime()
+{
+	return m_pNetChan->cleartime;
+}
+
+void CNetChan::SetClearTime(double time)
+{
+	m_pNetChan->cleartime = time;
+}
+
+int CNetChan::GetIncomingSequence()
+{
+	return m_pNetChan->incoming_sequence;
+}
+
+void CNetChan::SetIncomingSequence(int value)
+{
+	m_pNetChan->incoming_sequence = value;
+}
+
+int CNetChan::GetIncomingAcknowledged()
+{
+	return m_pNetChan->incoming_acknowledged;
+}
+
+void CNetChan::SetIncomingAcknowledged(int value)
+{
+	m_pNetChan->incoming_acknowledged = value;
+}
+
+int CNetChan::GetIncomingReliableAcknowledged()
+{
+	return m_pNetChan->incoming_reliable_acknowledged;
+}
+
+void CNetChan::SetIncomingReliableAcknowledged(int value)
+{
+	m_pNetChan->incoming_reliable_acknowledged = value;
+}
+
+int CNetChan::GetIncomingReliableSequence()
+{
+	return m_pNetChan->incoming_reliable_sequence;
+}
+
+void CNetChan::SetIncomingReliableSequence(int value)
+{
+	m_pNetChan->incoming_reliable_sequence = value;
+}
+
+int CNetChan::GetOutgoingSequence()
+{
+	return m_pNetChan->outgoing_sequence;
+}
+
+void CNetChan::SetOutgoingSequence(int value)
+{
+	m_pNetChan->outgoing_sequence = value;
+}
+
+int CNetChan::GetReliableSequence()
+{
+	return m_pNetChan->reliable_sequence;
+}
+
+void CNetChan::SetReliableSequence(int value)
+{
+	m_pNetChan->reliable_sequence = value;
+}
+
+int CNetChan::GetLastReliableSequence()
+{
+	return m_pNetChan->last_reliable_sequence;
+}
+
+void CNetChan::SetLastReliableSequence(int value)
+{
+	m_pNetChan->last_reliable_sequence = value;
+}
+
+void *CNetChan::GetConnectionStatusCtxPtr()
+{
+	return m_pNetChan->connection_status;
+}
+
+void CNetChan::SetConnectionStatusCtxPtr(void *ctx)
+{
+	m_pNetChan->connection_status = ctx;
+}
+
+void *CNetChan::GetCallbackNetBlocksize()
+{
+	return m_pNetChan->pfnNetchan_Blocksize;
+}
+
+void CNetChan::SetCallbackNetBlocksize(int (*pfnFunction)(void *))
+{
+	m_pNetChan->pfnNetchan_Blocksize = pfnFunction;
+}
+
+int CNetChan::GetReliableLength()
+{
+	return m_pNetChan->reliable_length;
+}
+
+void CNetChan::SetReliableLength(int length)
+{
+	m_pNetChan->reliable_length = length;
+}
+
+unsigned char *CNetChan::GetReliableBuf(int *nMaxSize)
+{
+	if (nMaxSize) *nMaxSize = sizeof(m_pNetChan->reliable_buf);
+	return m_pNetChan->reliable_buf;
+}
 
 const char* EXT_FUNC CRehldsServerData::GetModelName() {
 	return g_psv.modelname;

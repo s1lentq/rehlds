@@ -456,9 +456,35 @@ void EXT_FUNC RemoveCvarListener_api(const char *var_name, cvar_callback_t func)
 	}
 }
 
+bool EXT_FUNC Info_SetValueForStarKey_api(char *s, const char *key, const char *value, unsigned int maxsize)
+{
+#ifdef REHLDS_FIXES
+	return Info_SetValueForStarKey(s, key, value, maxsize) != FALSE;
+#else
+	Info_SetValueForStarKey(s, key, value, maxsize);
+	return true;
+#endif
+}
+
+void EXT_FUNC Info_RemovePrefixedKeys_api(char *s, const char prefix)
+{
+	Info_RemovePrefixedKeys(s, prefix);
+}
+
+void EXT_FUNC Info_RemoveKey_api(char *s, const char *lookup)
+{
+	Info_RemoveKey(s, lookup);
+}
+
+bool EXT_FUNC Info_IsValid_api(const char *s)
+{
+	return Info_IsValid(s) != FALSE;
+}
+
 CRehldsServerStatic g_RehldsServerStatic;
 CRehldsServerData g_RehldsServerData;
 CRehldsHookchains g_RehldsHookchains;
+CRehldsMemAlloc g_RehldsMemAlloc;
 RehldsFuncs_t g_RehldsApiFuncs =
 {
 	&SV_DropClient_api,
@@ -559,7 +585,11 @@ RehldsFuncs_t g_RehldsApiFuncs =
 	&SZ_Clear_api,
 	&MSG_BeginReading_api,
 	&GetHostFrameTime_api,
-	&GetFirstCmdFunctionHandle_api
+	&GetFirstCmdFunctionHandle_api,
+	&Info_SetValueForStarKey_api,
+	&Info_RemovePrefixedKeys_api,
+	&Info_RemoveKey_api,
+	&Info_IsValid_api
 };
 
 bool EXT_FUNC SV_EmitSound2_internal(edict_t *entity, IGameClient *pReceiver, int channel, const char *sample, float volume, float attenuation, int flags, int pitch, int emitFlags, const float *pOrigin)
@@ -835,6 +865,26 @@ IRehldsHookRegistry_GetEntityInit* CRehldsHookchains::GetEntityInit() {
 	return &m_GetEntityInit;
 }
 
+void *CRehldsMemAlloc::Alloc(unsigned int size) {
+	return Mem_ZeroMalloc(size);
+}
+
+void *CRehldsMemAlloc::Calloc(int num, unsigned int size) {
+	return Mem_Calloc(num, size);
+}
+
+void *CRehldsMemAlloc::Realloc(void *blockptr, unsigned int size) {
+	return Mem_Realloc(blockptr, size);
+}
+
+void CRehldsMemAlloc::Free(void *ptr) {
+	Mem_Free(ptr);
+}
+
+char *CRehldsMemAlloc::CloneString(const char *pString) {
+	return Mem_Strdup(pString);
+}
+
 int EXT_FUNC CRehldsApi::GetMajorVersion()
 {
 	return REHLDS_API_VERSION_MAJOR;
@@ -865,6 +915,10 @@ IRehldsServerData* EXT_FUNC CRehldsApi::GetServerData() {
 
 IRehldsFlightRecorder* EXT_FUNC CRehldsApi::GetFlightRecorder() {
 	return g_FlightRecorder;
+}
+
+IRehldsMemAlloc* EXT_FUNC CRehldsApi::GetMem() {
+	return &g_RehldsMemAlloc;
 }
 
 EXPOSE_SINGLE_INTERFACE(CRehldsApi, IRehldsApi, VREHLDS_HLDS_API_VERSION);

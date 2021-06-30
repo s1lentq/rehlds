@@ -234,6 +234,70 @@ public:
 	virtual const netadr_t* GetRemoteAdr() = 0;
 	virtual sizebuf_t* GetMessageBuf() = 0;
 
+	virtual int GetPlayerSlot() = 0;
+	virtual void SetPlayerSlot(int slot) = 0;
+
+	// For timeouts
+	// Time last message was received
+	virtual float GetLastReceived() = 0;
+	virtual void SetLastReceived(float lastreceived_time) = 0;
+	virtual bool IsTimedOut(float flAdjustTimeOutSeconds = 0.0f) = 0;
+
+	// Time when channel was connected
+	virtual float GetConnectTime() = 0;
+	virtual void SetConnectTime(float connect_time) = 0;
+
+	// Bandwidth choke
+	// Bytes per second
+	virtual double GetRate() = 0;
+	virtual void SetRate(double rate) = 0;
+
+	// If realtime > cleartime, free to send next packet
+	virtual double GetClearTime() = 0;
+	virtual void SetClearTime(double time) = 0;
+
+	// Sequencing variables
+	//
+	// Increasing count of sequence numbers
+	virtual int GetIncomingSequence() = 0;
+	virtual void SetIncomingSequence(int value) = 0;
+
+	// # of last outgoing message that has been ack'd
+	virtual int GetIncomingAcknowledged() = 0;
+	virtual void SetIncomingAcknowledged(int value) = 0;
+
+	// Toggles T/F as reliable messages are received
+	virtual int GetIncomingReliableAcknowledged() = 0;
+	virtual void SetIncomingReliableAcknowledged(int value) = 0;
+
+	// single bit, maintained local
+	virtual int GetIncomingReliableSequence() = 0;
+	virtual void SetIncomingReliableSequence(int value) = 0;
+
+	// Message we are sending to remote
+	virtual int GetOutgoingSequence() = 0;
+	virtual void SetOutgoingSequence(int value) = 0;
+
+	// Whether the message contains reliable payload, single bit
+	virtual int GetReliableSequence() = 0;
+	virtual void SetReliableSequence(int value) = 0;
+
+	// Outgoing sequence number of last send that had reliable data
+	virtual int GetLastReliableSequence() = 0;
+	virtual void SetLastReliableSequence(int value) = 0;
+
+	virtual void *GetConnectionStatusCtxPtr() = 0;
+	virtual void SetConnectionStatusCtxPtr(void *ctx) = 0;
+
+	virtual void *GetCallbackNetBlocksize() = 0;
+	virtual void SetCallbackNetBlocksize(int (*pfnFunction)(void *)) = 0;
+
+	// Reliable message buffer
+	// We keep adding to it until reliable is acknowledged
+	// Then we clear it
+	virtual int GetReliableLength() = 0;
+	virtual void SetReliableLength(int length) = 0;
+	virtual unsigned char *GetReliableBuf(int *nMaxSize = nullptr) = 0;
 
 	// this must be the last virtual function in class
 #ifdef REHLDS_SELF
@@ -323,4 +387,15 @@ public:
 	virtual sizebuf_t *GetMulticastBuf() = 0;
 	virtual sizebuf_t *GetSpectatorBuf() = 0;
 	virtual sizebuf_t *GetSignonBuf() = 0;
+};
+
+class IRehldsMemAlloc {
+public:
+	virtual ~IRehldsMemAlloc() { }
+
+	virtual void *Alloc(unsigned int size) = 0;
+	virtual void *Calloc(int num, unsigned int size) = 0;
+	virtual void *Realloc(void *blockptr, unsigned int size) = 0;
+	virtual void Free(void *ptr) = 0;
+	virtual char *CloneString(const char *pString) = 0;
 };
