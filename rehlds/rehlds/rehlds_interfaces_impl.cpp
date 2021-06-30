@@ -139,7 +139,7 @@ client_t* EXT_FUNC CGameClient::GetClient()
 
 bool EXT_FUNC CGameClient::IsFakeClient()
 {
-	return m_pClient->fakeclient;
+	return m_pClient->fakeclient != FALSE;
 }
 
 void EXT_FUNC CGameClient::SetFakeClient(bool state)
@@ -149,7 +149,7 @@ void EXT_FUNC CGameClient::SetFakeClient(bool state)
 
 bool EXT_FUNC CGameClient::IsFullyConnected()
 {
-	return m_pClient->fully_connected;
+	return m_pClient->fully_connected != FALSE;
 }
 
 void EXT_FUNC CGameClient::SetFullyConnected(bool state)
