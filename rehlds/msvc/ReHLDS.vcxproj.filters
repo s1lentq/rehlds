@@ -1061,12 +1061,4 @@
       <Filter>rehlds</Filter>
     </ClInclude>
   </ItemGroup>
-  <ItemGroup>
-    <None Include="..\linux\appversion.sh">
-      <Filter>linux</Filter>
-    </None>
-    <None Include="..\linux\Makefile">
-      <Filter>linux</Filter>
-    </None>
-  </ItemGroup>
 </Project>
