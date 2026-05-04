@@ -257,14 +257,6 @@ cvar_t sv_use_entity_file = { "sv_use_entity_file", "0", 0, 0.0f, nullptr };
 cvar_t sv_usercmd_custom_random_seed = { "sv_usercmd_custom_random_seed", "0", 0, 0.0f, nullptr };
 cvar_t sv_rehlds_allow_large_sprays = { "sv_rehlds_allow_large_sprays", "1", 0, 1.0f, nullptr };
 
-cvar_t sv_rehlds_maxusrcmdprocessticks = { "sv_rehlds_maxusrcmdprocessticks", "24", 0, 24.0f, nullptr };
-cvar_t sv_rehlds_movement_block_null_commands = { "sv_rehlds_movement_block_null_commands", "0", 0, 0.0f, nullptr };
-cvar_t sv_rehlds_movement_clamp_ex_interp = { "sv_rehlds_movement_clamp_ex_interp", "1", 0, 1.0f, nullptr };
-cvar_t sv_rehlds_movement_number_of_samples = { "sv_rehlds_movement_number_of_samples", "120", 0, 120.0f, nullptr };
-cvar_t sv_rehlds_movement_max_error_msec = { "sv_rehlds_movement_max_error_msec", "300", 0, 300.0f, nullptr };
-cvar_t sv_rehlds_movement_max_timescale = { "sv_rehlds_movement_max_timescale", "3", 0, 3.0f, nullptr };
-cvar_t sv_rehlds_movement_min_timescale = { "sv_rehlds_movement_min_timescale", "0.5", 0, 0.5f, nullptr };
-cvar_t sv_rehlds_movement_speedhack_punish = { "sv_rehlds_movement_speedhack_punish", "-1", 0, -1.0f, nullptr };
 #endif
 
 delta_t *SV_LookupDelta(char *name)
@@ -8054,25 +8046,6 @@ void SV_CheckCmdTimes(void)
 	}
 }
 
-#ifdef REHLDS_FIXES
-void SV_ResetProcessedUsrcmdTicks(void)
-{
-	client_t* cl;
-	CGameClient* pClient;
-	int i;
-
-	for (i = g_psvs.maxclients - 1; i >= 0; i--)
-	{
-		cl = &g_psvs.clients[i];
-		if (!cl->connected || !cl->active)
-			continue;
-
-		pClient = g_GameClients[cl - g_psvs.clients];
-		pClient->m_nProcessedUsrcmdsThisVeryTick = 0;
-	}
-}
-#endif //REHLDS_FIXES
-
 void SV_CheckForRcon(void)
 {
 	if (g_psv.active || g_pcls.state != ca_dedicated || giActive == DLL_CLOSE || !host_initialized)
@@ -8141,9 +8114,6 @@ void EXT_FUNC SV_Frame_Internal()
 	gGlobalVariables.frametime = host_frametime;
 	g_psv.oldtime = g_psv.time;
 	SV_CheckCmdTimes();
-#ifdef REHLDS_FIXES
-	SV_ResetProcessedUsrcmdTicks();
-#endif // REHLDS_FIXES
 	SV_ReadPackets();
 	if (SV_IsSimulating())
 	{
@@ -8393,15 +8363,6 @@ void SV_Init(void)
 	Cvar_RegisterVariable(&sv_use_entity_file);
 	Cvar_RegisterVariable(&sv_usercmd_custom_random_seed);
 	Cvar_RegisterVariable(&sv_rehlds_allow_large_sprays);
-
-	Cvar_RegisterVariable(&sv_rehlds_maxusrcmdprocessticks);
-	Cvar_RegisterVariable(&sv_rehlds_movement_block_null_commands);
-	Cvar_RegisterVariable(&sv_rehlds_movement_clamp_ex_interp);
-	Cvar_RegisterVariable(&sv_rehlds_movement_number_of_samples);
-	Cvar_RegisterVariable(&sv_rehlds_movement_max_error_msec);
-	Cvar_RegisterVariable(&sv_rehlds_movement_max_timescale);
-	Cvar_RegisterVariable(&sv_rehlds_movement_min_timescale);
-	Cvar_RegisterVariable(&sv_rehlds_movement_speedhack_punish);
 #endif
 
 	//------------------------------------------------
