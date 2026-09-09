@@ -227,7 +227,7 @@ jobs:
   linux:
     name: 'Linux'
     runs-on: ubuntu-24.04
-    container: debian:11-slim
+    container: debian/eol:bullseye-slim
 
     steps:
       - name: Install dependencies
@@ -251,6 +251,11 @@ jobs:
 
       - name: GPG Import
         run: |
+          if [[ -z "${{ secrets.PUB_ASC }}" ]] || [[ -z "${{ secrets.KEY_ASC }}" ]]; then
+            echo "Warning: GPG secrets are not configured, skipping sign stage..."
+            exit 0
+          fi
+
           echo "${{ secrets.PUB_ASC }}" > "${{ secrets.PUB_ASC_FILE }}"
           echo "${{ secrets.KEY_ASC }}" > "${{ secrets.KEY_ASC_FILE }}"
 
@@ -406,6 +411,10 @@ jobs:
             echo "SIGN_READY=true" >> $GITHUB_ENV
           else
            echo "SIGN_READY=false" >> $GITHUB_ENV
+          fi
+
+          if [[ -z "${{ secrets.PUB_ASC }}" ]] || [[ -z "$PUB_ASC_FILE" ]]; then
+            echo "SIGN_READY=false" >> $GITHUB_ENV
           fi
 
       - name: Final signing and Packaging bin/dbg
